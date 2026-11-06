@@ -1,4 +1,4 @@
-// Numerical & Simulation Utilities for Generalization Atlas
+// Numerical & Simulation Utilities for Generalization and Optimization Suite
 
 export interface Point2D {
   x: number;
@@ -29,13 +29,11 @@ export function generateRegressionData(
   numPoints: number,
   noiseStd: number
 ): { trainPoints: Point2D[]; testPoints: Point2D[] } {
-  // Deterministic spread with noise
   const trainPoints: Point2D[] = [];
   const testPoints: Point2D[] = [];
 
-  // Generate training points
+  // Generate training points with deterministic spread + noise
   for (let i = 0; i < numPoints; i++) {
-    // Non-uniform spacing to simulate real-world cluster sampling
     const ratio = (i + 0.5) / numPoints;
     const x = -1 + 2 * ratio;
     const noise = gaussianRandom(0, noiseStd);
@@ -43,10 +41,10 @@ export function generateRegressionData(
     trainPoints.push({ x: Number(x.toFixed(4)), y: Number(y.toFixed(4)) });
   }
 
-  // Generate 40 fixed test points across the domain to measure generalization
-  const testCount = 40;
+  // Generate 45 fixed test points across the domain
+  const testCount = 45;
   for (let i = 0; i < testCount; i++) {
-    const x = -0.95 + 1.9 * (i / (testCount - 1));
+    const x = -0.96 + 1.92 * (i / (testCount - 1));
     const noise = gaussianRandom(0, noiseStd * 0.75);
     const y = groundTruthFn(x) + noise;
     testPoints.push({ x: Number(x.toFixed(4)), y: Number(y.toFixed(4)) });
@@ -56,14 +54,12 @@ export function generateRegressionData(
 }
 
 // Solve linear system A * w = b using Gaussian elimination with partial pivoting
-function solveLinearSystem(A: number[][], b: number[]): number[] {
+export function solveLinearSystem(A: number[][], b: number[]): number[] {
   const n = b.length;
-  // Deep copy A and b
   const M: number[][] = A.map((row) => [...row]);
   const y: number[] = [...b];
 
   for (let col = 0; col < n; col++) {
-    // Find pivot
     let maxRow = col;
     let maxVal = Math.abs(M[col][col]);
     for (let row = col + 1; row < n; row++) {
@@ -73,7 +69,6 @@ function solveLinearSystem(A: number[][], b: number[]): number[] {
       }
     }
 
-    // Swap rows
     if (maxRow !== col) {
       [M[col], M[maxRow]] = [M[maxRow], M[col]];
       [y[col], y[maxRow]] = [y[maxRow], y[col]];
@@ -81,11 +76,9 @@ function solveLinearSystem(A: number[][], b: number[]): number[] {
 
     const pivot = M[col][col];
     if (Math.abs(pivot) < 1e-12) {
-      // Degenerate or singular; add tiny jitter
       M[col][col] += 1e-7;
     }
 
-    // Eliminate column
     for (let row = col + 1; row < n; row++) {
       const factor = M[row][col] / M[col][col];
       y[row] -= factor * y[col];
@@ -95,7 +88,6 @@ function solveLinearSystem(A: number[][], b: number[]): number[] {
     }
   }
 
-  // Back substitution
   const w = new Array(n).fill(0);
   for (let i = n - 1; i >= 0; i--) {
     let sum = y[i];
@@ -108,7 +100,7 @@ function solveLinearSystem(A: number[][], b: number[]): number[] {
   return w;
 }
 
-// Fit polynomial with Ridge Regularization: (X^T * X + lambda * I) * w = X^T * y
+// Fit polynomial with Ridge (L2) Regularization: (X^T * X + lambda * I) * w = X^T * y
 export function fitPolynomial(
   points: Point2D[],
   degree: number,
@@ -116,16 +108,13 @@ export function fitPolynomial(
 ): number[] {
   const n = degree + 1;
   const N = points.length;
-
   if (N === 0) return new Array(n).fill(0);
 
-  // Normal equations: (X^T X + lambda I) w = X^T y
   const XtX: number[][] = Array.from({ length: n }, () => new Array(n).fill(0));
   const Xty: number[] = new Array(n).fill(0);
 
   for (let i = 0; i < N; i++) {
     const { x, y } = points[i];
-    // Powers of x: x^0, x^1, ..., x^degree
     const powers = new Array(n);
     powers[0] = 1;
     for (let p = 1; p < n; p++) {
@@ -140,12 +129,86 @@ export function fitPolynomial(
     }
   }
 
-  // Add L2 Ridge penalty to diagonal (excluding bias term at index 0)
+  // Add L2 penalty to diagonal (leave bias index 0 unpenalized)
   for (let i = 1; i < n; i++) {
     XtX[i][i] += regularizationLambda * N;
   }
 
   return solveLinearSystem(XtX, Xty);
+}
+
+// Coordinate Descent Solver for Lasso (L1 Regularization):
+// Minimizes 1/(2N) * ||y - Xw||^2 + lambda * sum(|w_j|)
+export function fitPolynomialLasso(
+  points: Point2D[],
+  degree: number,
+  lambda: number,
+  maxIterations = 50
+): number[] {
+  const n = degree + 1;
+  const N = points.length;
+  if (N === 0) return new Array(n).fill(0);
+
+  // Precompute design matrix X
+  const X: number[][] = Array.from({ length: N }, () => new Array(n).fill(0));
+  for (let i = 0; i < N; i++) {
+    const x = points[i].x;
+    X[i][0] = 1;
+    for (let p = 1; p < n; p++) {
+      X[i][p] = X[i][p - 1] * x;
+    }
+  }
+
+  // Precompute squared column norms z_j = sum(X_ij^2)
+  const z: number[] = new Array(n).fill(0);
+  for (let j = 0; j < n; j++) {
+    let sumSq = 0;
+    for (let i = 0; i < N; i++) {
+      sumSq += X[i][j] * X[i][j];
+    }
+    z[j] = sumSq || 1e-6;
+  }
+
+  // Initialize weights using ridge warm-start
+  let w = fitPolynomial(points, degree, 0.001);
+
+  // If lambda is 0, return unregularized fit
+  if (lambda <= 1e-6) {
+    return w;
+  }
+
+  // Coordinate descent iterations
+  const threshold = (lambda * N) / 2;
+  for (let iter = 0; iter < maxIterations; iter++) {
+    for (let j = 0; j < n; j++) {
+      // Calculate residual correlation rho_j
+      let rho = 0;
+      for (let i = 0; i < N; i++) {
+        let predExcludingJ = 0;
+        for (let k = 0; k < n; k++) {
+          if (k !== j) predExcludingJ += X[i][k] * w[k];
+        }
+        const residual = points[i].y - predExcludingJ;
+        rho += X[i][j] * residual;
+      }
+
+      // Intercept is not penalized
+      if (j === 0) {
+        w[0] = rho / z[0];
+      } else {
+        // Soft thresholding operator
+        if (rho > threshold) {
+          w[j] = (rho - threshold) / z[j];
+        } else if (rho < -threshold) {
+          w[j] = (rho + threshold) / z[j];
+        } else {
+          w[j] = 0; // Exactly 0 (sparsity!)
+        }
+      }
+    }
+  }
+
+  return w;
 }
 
 // Evaluate polynomial at x: w0 + w1*x + w2*x^2 + ...
@@ -165,7 +228,6 @@ export function computeMSE(points: Point2D[], coeffs: number[]): number {
   let sum = 0;
   for (const pt of points) {
     const pred = evaluatePolynomial(coeffs, pt.x);
-    // Clamp extreme divergence for numerical display stability
     const clampedPred = Math.max(-50, Math.min(50, pred));
     sum += Math.pow(pt.y - clampedPred, 2);
   }
@@ -175,36 +237,25 @@ export function computeMSE(points: Point2D[], coeffs: number[]): number {
 // 2D Classification Dataset Generators
 export function generate2DClassification(
   datasetType: 'circles' | 'moons' | 'xor',
-  numSamples = 100,
+  numSamples = 90,
   noise = 0.15
 ): ClassificationPoint[] {
   const points: ClassificationPoint[] = [];
 
   if (datasetType === 'circles') {
     const half = Math.floor(numSamples / 2);
-    // Inner circle (Label 1)
     for (let i = 0; i < half; i++) {
       const angle = Math.random() * 2 * Math.PI;
       const r = 0.35 + gaussianRandom(0, noise * 0.4);
-      points.push({
-        x: r * Math.cos(angle),
-        y: r * Math.sin(angle),
-        label: 1,
-      });
+      points.push({ x: r * Math.cos(angle), y: r * Math.sin(angle), label: 1 });
     }
-    // Outer ring (Label 0)
     for (let i = 0; i < half; i++) {
       const angle = Math.random() * 2 * Math.PI;
       const r = 0.8 + gaussianRandom(0, noise * 0.4);
-      points.push({
-        x: r * Math.cos(angle),
-        y: r * Math.sin(angle),
-        label: 0,
-      });
+      points.push({ x: r * Math.cos(angle), y: r * Math.sin(angle), label: 0 });
     }
   } else if (datasetType === 'moons') {
     const half = Math.floor(numSamples / 2);
-    // Upper moon (Label 0)
     for (let i = 0; i < half; i++) {
       const theta = Math.PI * Math.random();
       points.push({
@@ -213,7 +264,6 @@ export function generate2DClassification(
         label: 0,
       });
     }
-    // Lower moon (Label 1)
     for (let i = 0; i < half; i++) {
       const theta = Math.PI * Math.random();
       points.push({
@@ -223,12 +273,10 @@ export function generate2DClassification(
       });
     }
   } else {
-    // Noisy XOR
     for (let i = 0; i < numSamples; i++) {
       const x = (Math.random() - 0.5) * 1.8;
       const y = (Math.random() - 0.5) * 1.8;
       let label: 0 | 1 = (x > 0 && y > 0) || (x < 0 && y < 0) ? 1 : 0;
-      // Inject random label noise
       if (Math.random() < noise) {
         label = label === 1 ? 0 : 1;
       }
@@ -247,13 +295,11 @@ export function predict2D(
   complexity: 'linear' | 'moderate' | 'complex'
 ): number {
   if (complexity === 'linear') {
-    // Linear decision boundary
     const z = 1.6 * x - 1.2 * y;
     return 1 / (1 + Math.exp(-z));
   }
 
   if (complexity === 'moderate') {
-    // Smooth nonlinear RBF with appropriate bandwidth
     let score = 0;
     const gamma = 2.5;
     for (const pt of points) {
@@ -264,7 +310,6 @@ export function predict2D(
     return 1 / (1 + Math.exp(-score * 1.4));
   }
 
-  // Complex / Overfitted: high gamma, wraps around individual noise outliers creating ragged boundaries
   let score = 0;
   const gamma = 18.0;
   for (const pt of points) {
@@ -273,6 +318,97 @@ export function predict2D(
     score += (pt.label === 1 ? 2.5 : -2.5) * weight;
   }
   return 1 / (1 + Math.exp(-score * 2.5));
+}
+
+// ============================================================================
+// GRADIENT DESCENT OPTIMIZATION MATH & UTILS
+// ============================================================================
+
+export interface GDTrajectoryPoint {
+  w1: number;
+  w2: number;
+  loss: number;
+  grad1: number;
+  grad2: number;
+  step: number;
+}
+
+// Loss function surface: Anisotropic quadratic valley with cross term
+// J(w1, w2) = 0.5 * (a*w1^2 + b*w2^2) + c*w1*w2
+export const GD_CONSTANTS = {
+  a: 1.2,
+  b: 5.2,
+  c: 0.8,
+};
+
+export function computeGDLoss(w1: number, w2: number, l1Lambda = 0, l2Lambda = 0): number {
+  const { a, b, c } = GD_CONSTANTS;
+  const baseLoss = 0.5 * (a * w1 * w1 + b * w2 * w2) + c * w1 * w2;
+  const l2Penalty = 0.5 * l2Lambda * (w1 * w1 + w2 * w2);
+  const l1Penalty = l1Lambda * (Math.abs(w1) + Math.abs(w2));
+  return baseLoss + l2Penalty + l1Penalty;
+}
+
+export function computeGDGradient(
+  w1: number,
+  w2: number,
+  l1Lambda = 0,
+  l2Lambda = 0
+): { grad1: number; grad2: number } {
+  const { a, b, c } = GD_CONSTANTS;
+  let g1 = a * w1 + c * w2;
+  let g2 = b * w2 + c * w1;
+
+  // L2 Regularization gradient
+  if (l2Lambda > 0) {
+    g1 += l2Lambda * w1;
+    g2 += l2Lambda * w2;
+  }
+
+  // L1 Subgradient
+  if (l1Lambda > 0) {
+    g1 += l1Lambda * Math.sign(w1);
+    g2 += l1Lambda * Math.sign(w2);
+  }
+
+  return { grad1: g1, grad2: g2 };
+}
+
+// ============================================================================
+// BIAS-VARIANCE TRADEOFF CURVE DATA GENERATOR
+// ============================================================================
+
+export interface BiasVarianceDataPoint {
+  complexity: number;
+  biasSq: number;
+  variance: number;
+  irreducibleNoise: number;
+  totalError: number;
+}
+
+export function generateBiasVarianceTradeoff(maxComplexity = 12): BiasVarianceDataPoint[] {
+  const points: BiasVarianceDataPoint[] = [];
+  const irreducibleNoise = 0.08;
+
+  for (let c = 1; c <= maxComplexity; c++) {
+    // Bias squared decays exponentially with model complexity
+    const biasSq = 0.95 * Math.exp(-0.48 * (c - 1)) + 0.02;
+
+    // Variance grows rapidly / exponentially with model complexity
+    const variance = 0.015 * (Math.pow(1.52, c - 1) - 1);
+
+    const totalError = biasSq + variance + irreducibleNoise;
+
+    points.push({
+      complexity: c,
+      biasSq: Number(biasSq.toFixed(4)),
+      variance: Number(variance.toFixed(4)),
+      irreducibleNoise: Number(irreducibleNoise.toFixed(4)),
+      totalError: Number(totalError.toFixed(4)),
+    });
+  }
+
+  return points;
 }
 
 // Generate training history curves for Epoch Simulation
@@ -302,9 +438,8 @@ export function generateEpochCurves(totalEpochs = 60) {
     optimalTrain.push(Number(opT.toFixed(3)));
     optimalVal.push(Number(opV.toFixed(3)));
 
-    // Overfit: Train loss collapses to ~0, Val loss bottoms around epoch 22 and then climbs steeply!
+    // Overfit: Train loss collapses to ~0, Val loss bottoms around epoch 22 and climbs
     const ofT = 0.01 + 0.89 * Math.exp(-e / 8);
-    // U-shaped validation curve
     const bestEpoch = 22;
     const uCurve = Math.pow((e - bestEpoch) / 28, 2);
     const ofV = 0.09 + 0.82 * Math.exp(-e / 10) + (e > bestEpoch ? uCurve * 0.35 : 0) + 0.02 * Math.sin(e * 0.7);

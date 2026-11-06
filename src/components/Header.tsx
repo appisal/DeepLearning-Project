@@ -1,63 +1,69 @@
 import React from 'react';
-import { RotateCcw, BookOpen } from 'lucide-react';
+import { RotateCcw, Activity, Shield, Zap, Scale } from 'lucide-react';
+
+export type SimTab = 'overfitting' | 'regularization' | 'gradient-descent' | 'tradeoff';
 
 interface HeaderProps {
-  walkthroughMode: boolean;
-  onToggleWalkthroughMode: () => void;
+  activeTab: SimTab;
+  onSelectTab: (tab: SimTab) => void;
   onReset: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
-  walkthroughMode,
-  onToggleWalkthroughMode,
+  activeTab,
+  onSelectTab,
   onReset,
 }) => {
   return (
     <header className="site-header">
       <div className="header-container">
-        <a href="#top" className="brand-link">
+        <div className="brand-link">
           <div className="brand-symbol">Ω</div>
           <div className="brand-text">
-            <h1>GENERALIZATION ATLAS</h1>
-            <span>DEEP LEARNING FOUNDATIONS • VOL. 01</span>
+            <h1>DEEP LEARNING SIMULATION LAB</h1>
+            <span>INTERACTIVE FOUNDATIONS • CORE SUITE</span>
           </div>
-        </a>
+        </div>
 
         <nav className="nav-links">
-          <a href="#why" className="nav-link">
-            <span>01</span> Concept
-          </a>
-          <a href="#gallery" className="nav-link">
-            <span>02</span> Gallery
-          </a>
-          <a href="#lab" className="nav-link">
-            <span>03</span> Live Lab
-          </a>
-          <a href="#matrix" className="nav-link">
-            <span>04</span> Matrix
-          </a>
-          <a href="#clinic" className="nav-link">
-            <span>05</span> Clinic
-          </a>
-          <a href="#walkthrough" className="nav-link">
-            <span>06</span> Walkthrough
-          </a>
+          <button
+            className={`nav-link-btn ${activeTab === 'overfitting' ? 'active' : ''}`}
+            onClick={() => onSelectTab('overfitting')}
+          >
+            <Activity size={14} />
+            <span>Overfitting & Underfitting</span>
+          </button>
+
+          <button
+            className={`nav-link-btn ${activeTab === 'regularization' ? 'active' : ''}`}
+            onClick={() => onSelectTab('regularization')}
+          >
+            <Shield size={14} />
+            <span>L1 / L2 Regularization</span>
+          </button>
+
+          <button
+            className={`nav-link-btn ${activeTab === 'gradient-descent' ? 'active' : ''}`}
+            onClick={() => onSelectTab('gradient-descent')}
+          >
+            <Zap size={14} />
+            <span>Gradient Descent</span>
+          </button>
+
+          <button
+            className={`nav-link-btn ${activeTab === 'tradeoff' ? 'active' : ''}`}
+            onClick={() => onSelectTab('tradeoff')}
+          >
+            <Scale size={14} />
+            <span>Tradeoff Analysis</span>
+          </button>
         </nav>
 
         <div className="header-actions">
           <button
-            className={`mode-toggle ${walkthroughMode ? 'active' : ''}`}
-            onClick={onToggleWalkthroughMode}
-            title="Jump to the step-by-step conceptual walkthrough module"
-          >
-            <BookOpen size={15} />
-            <span>{walkthroughMode ? 'Walkthrough Mode' : 'Guided Tour'}</span>
-          </button>
-
-          <button
             className="reset-button"
             onClick={onReset}
-            title="Reset all interactive labs and filters"
+            title="Reset parameters to initial defaults"
           >
             <RotateCcw size={13} />
             <span>Reset</span>
